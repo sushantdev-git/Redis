@@ -6,7 +6,7 @@
 #include <cstring>      // For functions like memset() (optional but useful)
 #include <iostream>
 #include <cstdlib> // For exit()
-#include "helper.c++"
+#include "helper.cpp"
 
 static int32_t sendRequest(int fd, const char *requestBody)
 {

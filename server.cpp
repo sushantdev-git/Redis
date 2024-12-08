@@ -7,62 +7,7 @@
 #include <iostream>
 #include <cstdlib> // For exit()
 #include <poll.h>
-#include "helper.c++"
-
-static int32_t one_request(int connfd)
-{
-    // 4 bytes header
-    char rbuf[4 + k_max_msg + 1];
-    errno = 0;
-
-    // read the length of the message, by reading first 4 bytes.
-    int32_t err = read_full(connfd, rbuf, 4);
-
-    if (err)
-    {
-        if (errno == 0)
-        {
-            msg("EOF");
-        }
-        else
-        {
-            msg("read() error");
-        }
-        return err;
-    }
-
-    uint32_t messageLength = 0;
-    memcpy(&messageLength, rbuf, 4); // assume little endian
-    if (messageLength > k_max_msg)
-    {
-        msg("too long");
-        return -1;
-    }
-
-    // read full message/request body
-    err = read_full(connfd, &rbuf[4], messageLength);
-
-    if (err)
-    {
-        msg("read() error");
-        return err;
-    }
-
-    // do something
-    rbuf[4 + messageLength] = '\0';
-    printf("client message length: %u\n", messageLength);
-    printf("client says: %s\n", &rbuf[4]);
-
-    // reply using the same protocol
-    const char reply[] = "world";
-    char wbuf[4 + sizeof(reply)];
-    int writeMessageLength = (uint32_t)strlen(reply);
-
-    memcpy(wbuf, &writeMessageLength, 4);
-    memcpy(&wbuf[4], reply, writeMessageLength);
-
-    return write_all(connfd, wbuf, 4 + writeMessageLength);
-}
+#include "helper.cpp"
 
 int main()
 {
