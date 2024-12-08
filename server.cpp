@@ -6,21 +6,8 @@
 #include <cstring>      // For functions like memset() (optional but useful)
 #include <iostream>
 #include <cstdlib> // For exit()
+#include <poll.h>
 #include "helper.c++"
-
-static void do_something(int connfd)
-{
-    char rbuf[64] = {};
-    ssize_t n = read(connfd, rbuf, sizeof(rbuf) - 1);
-    if (n < 0)
-    {
-        msg("read() error");
-        return;
-    }
-    printf("client says: %s\n", rbuf);
-    char wbuf[] = "world";
-    write(connfd, wbuf, strlen(wbuf));
-}
 
 static int32_t one_request(int connfd)
 {
@@ -91,8 +78,9 @@ int main()
 
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port = ntohs(1234);
-    addr.sin_addr.s_addr = ntohl(0);
+    addr.sin_port = htons(1234);
+    addr.sin_addr.s_addr = htonl(0);
+
     int rv = bind(fd, (const sockaddr *)&addr, sizeof(addr));
 
     if (rv)
@@ -106,29 +94,60 @@ int main()
         die("listen()");
     }
 
+    // a map of all client connections, keyed by fd
+    std::vector<Connection *> fd2conn;
+
+    fd_set_nb(fd);
+
+    //file descriptors to poll
+    std::vector<struct pollfd> poll_args;
+
     while (true)
     {
-        // accept
-        struct sockaddr_in client_addr = {};
-        socklen_t socklen = sizeof(client_addr);
-        int connfd = accept(fd, (struct sockaddr *)&client_addr, &socklen);
-        if (connfd < 0)
-        {
-            continue; // error
-        }
-        std::cout << "Address: " << inet_ntoa(client_addr.sin_addr) << std::endl;
+        poll_args.clear();
 
-        //read multiple request from single connection
-        while (true)
+        struct pollfd pfd = {fd, POLLIN, 0};
+        poll_args.push_back(pfd);
+
+        for (Connection *conn : fd2conn)
         {
-            int32_t err = one_request(connfd);
-            if (err)
+            if (!conn)
+                continue;
+
+            struct pollfd pfd = {};
+            pfd.fd = conn->fd;
+            pfd.events = (conn->state == STATE_REQ) ? POLLIN : POLLOUT;
+            pfd.events = pfd.events | POLLERR;
+            poll_args.push_back(pfd);
+        }
+
+        int rv = poll(poll_args.data(), (nfds_t)poll_args.size(), 1000);
+        if (rv < 0)
+            die("poll");
+
+        // process active connections
+        for (size_t i = 1; i < poll_args.size(); ++i)
+        {
+            if (poll_args[i].revents)
             {
-                break;
+                Connection *conn = fd2conn[poll_args[i].fd];
+                connection_io(conn);
+                if (conn->state == STATE_END)
+                {
+                    // client closed normally, or something bad happened.
+                    // destroy this connection
+                    fd2conn[conn->fd] = NULL;
+                    (void)close(conn->fd);
+                    free(conn);
+                }
             }
         }
 
-        close(connfd);
+        // try to accept a new connection if the listening fd is active
+        if (poll_args[0].revents)
+        {
+            (void)accept_new_conn(fd2conn, fd);
+        }
     }
 
     return 0;

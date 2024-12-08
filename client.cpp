@@ -8,9 +8,9 @@
 #include <cstdlib> // For exit()
 #include "helper.c++"
 
-static int32_t query(int fd, const char *queryText)
+static int32_t sendRequest(int fd, const char *requestBody)
 {
-    uint32_t messageLength = (uint32_t)strlen(queryText);
+    uint32_t messageLength = (uint32_t)strlen(requestBody);
 
     if (messageLength > k_max_msg)
     {
@@ -20,12 +20,13 @@ static int32_t query(int fd, const char *queryText)
     char wbuf[4 + k_max_msg];
 
     memcpy(wbuf, &messageLength, 4); // assume little endian
-    memcpy(&wbuf[4], queryText, messageLength);
+    memcpy(&wbuf[4], requestBody, messageLength);
 
-    if (int32_t err = write_all(fd, wbuf, 4 + messageLength))
-    {
-        return err;
-    }
+    return write_all(fd, wbuf, 4 + messageLength);
+}
+
+static int32_t readResponse(int fd)
+{
 
     // 4 bytes header
     char rbuf[4 + k_max_msg + 1];
@@ -46,6 +47,7 @@ static int32_t query(int fd, const char *queryText)
         return err;
     }
 
+    uint32_t messageLength = 0;
     memcpy(&messageLength, rbuf, 4); // assume little endian
 
     if (messageLength > k_max_msg)
@@ -82,8 +84,8 @@ int main()
 
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port = ntohs(1234);
-    addr.sin_addr.s_addr = ntohl(INADDR_LOOPBACK); // 127.0.0.1
+    addr.sin_port = htons(1234);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
 
     int rv = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
 
@@ -92,18 +94,27 @@ int main()
         die("connect");
     }
 
-    int32_t err = query(fd, "hello1");
-    if(err) goto L_DONE;
-
-    err = query(fd, "hello2");
-    if(err) goto L_DONE;
-
-    err = query(fd, "hello3");
-    if(err) goto L_DONE;
+    const char *query_list[3] = {"hello1", "hello2", "hello3"};
+    for (size_t i = 0; i < 3; ++i)
+    {
+        int32_t err = sendRequest(fd, query_list[i]);
+        if (err)
+        {
+            goto L_DONE;
+        }
+    }
+    for (size_t i = 0; i < 3; ++i)
+    {
+        int32_t err = readResponse(fd);
+        if (err)
+        {
+            goto L_DONE;
+        }
+    }
 
     goto L_DONE;
 
-    L_DONE:
-        close(fd);
-        return 0;
+L_DONE:
+    close(fd);
+    return 0;
 }
